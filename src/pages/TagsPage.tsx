@@ -1,40 +1,43 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Card,
-  CardHeader,
   CardBody,
+  CardHeader,
   Button,
   Input,
-  Table,
-  TableHeader,
-  TableBody,
-  TableColumn,
-  TableRow,
-  TableCell,
-  useDisclosure,
   Modal,
   ModalContent,
   ModalHeader,
   ModalBody,
   ModalFooter,
+  useDisclosure,
   Chip,
-  Tooltip,
-} from "@nextui-org/react";
-import { Plus, Trash2, X } from "lucide-react";
-import { apiService, Tag } from "../services/apiService";
+  Dropdown,
+  DropdownTrigger,
+  DropdownMenu,
+  DropdownItem
+} from '@nextui-org/react';
+import { Plus, MoreVertical, Trash2, Tag as TagIcon, X } from 'lucide-react';
+import { apiService } from '../services/apiService';
+import { useAuth } from '../components/AuthContext';
+import { TagDTO } from '../types/types';
 
-interface TagsPageProps {
-  isAuthenticated: boolean;
-}
-
-const TagsPage: React.FC<TagsPageProps> = ({ isAuthenticated }) => {
-  const [tags, setTags] = useState<Tag[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [newTags, setNewTags] = useState<string[]>([]);
-  const [tagInput, setTagInput] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
+const TagsPage: React.FC = () => {
+  const navigate = useNavigate();
+  const { isAuthenticated } = useAuth();
   const { isOpen, onOpen, onClose } = useDisclosure();
+
+  const [tags, setTags] = useState<TagDTO[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [creating, setCreating] = useState<boolean>(false);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  
+  // Form state
+  const [newTagNames, setNewTagNames] = useState<string[]>([]);
+  const [currentTagInput, setCurrentTagInput] = useState<string>('');
+  const [formError, setFormError] = useState<string>('');
 
   useEffect(() => {
     fetchTags();
@@ -46,189 +49,330 @@ const TagsPage: React.FC<TagsPageProps> = ({ isAuthenticated }) => {
       const response = await apiService.getTags();
       setTags(response);
       setError(null);
-    } catch (err) {
-      setError("Failed to load tags. Please try again later.");
+    } catch (err: any) {
+      setError(err?.message || 'Failed to load tags');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAddTags = async () => {
-    if (newTags.length === 0) {
+  const handleAddTagName = () => {
+    const tagName = currentTagInput.trim();
+    
+    if (!tagName) {
+      setFormError('Tag name cannot be empty');
       return;
     }
 
-    try {
-      setIsSubmitting(true);
-      await apiService.createTags(newTags);
-      await fetchTags();
-      handleModalClose();
-    } catch (err) {
-      setError("Failed to create tags. Please try again.");
-    } finally {
-      setIsSubmitting(false);
+    if (newTagNames.includes(tagName)) {
+      setFormError('Tag already added');
+      return;
+    }
+
+    if (newTagNames.length >= 10) {
+      setFormError('Maximum 10 tags allowed');
+      return;
+    }
+
+    setNewTagNames([...newTagNames, tagName]);
+    setCurrentTagInput('');
+    setFormError('');
+  };
+
+  const handleRemoveTagName = (tagToRemove: string) => {
+    setNewTagNames(newTagNames.filter(tag => tag !== tagToRemove));
+  };
+
+  const handleKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      handleAddTagName();
     }
   };
 
-  const handleDelete = async (tag: Tag) => {
-    if (
-      !window.confirm(`Are you sure you want to delete the tag "${tag.name}"?`)
-    ) {
+  const handleCreateTags = async () => {
+    if (newTagNames.length === 0) {
+      setFormError('At least one tag is required');
+      return;
+    }
+
+    if (!isAuthenticated) {
+      navigate('/login');
       return;
     }
 
     try {
-      setLoading(true);
-      await apiService.deleteTag(tag.id);
-      await fetchTags();
-    } catch (err) {
-      setError("Failed to delete tag. Please try again.");
+      setCreating(true);
+      setFormError('');
+      
+      await apiService.createTags(newTagNames);
+      setNewTagNames([]);
+      setCurrentTagInput('');
+      onClose();
+      await fetchTags(); // Refresh the list
+      
+    } catch (err: any) {
+      setFormError(err?.message || 'Failed to create tags');
     } finally {
-      setLoading(false);
+      setCreating(false);
     }
+  };
+
+  const handleDeleteTag = async (tagId: string) => {
+    if (!isAuthenticated) {
+      navigate('/login');
+      return;
+    }
+
+    if (!confirm('Are you sure you want to delete this tag? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      setDeleting(tagId);
+      await apiService.deleteTag(tagId);
+      await fetchTags(); // Refresh the list
+    } catch (err: any) {
+      setError(err?.message || 'Failed to delete tag');
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const handleViewPosts = (tagId: string) => {
+    navigate(`/?tagId=${tagId}`);
   };
 
   const handleModalClose = () => {
-    setNewTags([]);
-    setTagInput("");
+    setNewTagNames([]);
+    setCurrentTagInput('');
+    setFormError('');
     onClose();
   };
 
-  const handleTagInputKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" || e.key === ",") {
-      e.preventDefault();
-      const value = tagInput.trim().toLowerCase();
-      if (value && !newTags.includes(value)) {
-        setNewTags([...newTags, value]);
-        setTagInput("");
-      }
-    } else if (e.key === "Backspace" && !tagInput && newTags.length > 0) {
-      setNewTags(newTags.slice(0, -1));
-    }
-  };
-
-  const handleRemoveNewTag = (tagToRemove: string) => {
-    setNewTags(newTags.filter((tag) => tag !== tagToRemove));
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="max-w-6xl mx-auto px-4">
+          <Card className="w-full">
+            <CardBody>
+              <div className="space-y-4 animate-pulse">
+                <div className="h-8 bg-gray-200 rounded w-1/3"></div>
+                <div className="flex flex-wrap gap-2">
+                  {[...Array(12)].map((_, index) => (
+                    <div key={index} className="h-8 bg-gray-200 rounded-full w-20"></div>
+                  ))}
+                </div>
+              </div>
+            </CardBody>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="max-w-4xl mx-auto px-4">
-      <Card>
-        <CardHeader className="flex justify-between items-center">
-          <h1 className="text-2xl font-bold">Tags</h1>
-          {isAuthenticated && (
-            <Button
-              color="primary"
-              startContent={<Plus size={16} />}
-              onClick={onOpen}
-            >
-              Add Tags
-            </Button>
-          )}
-        </CardHeader>
-
-        <CardBody>
-          {error && (
-            <div className="mb-4 p-4 text-red-500 bg-red-50 rounded-lg">
-              {error}
-            </div>
-          )}
-
-          <Table
-            aria-label="Tags table"
-            isHeaderSticky
-            classNames={{
-              wrapper: "max-h-[600px]",
-            }}
-          >
-            <TableHeader>
-              <TableColumn>NAME</TableColumn>
-              <TableColumn>POST COUNT</TableColumn>
-              <TableColumn>ACTIONS</TableColumn>
-            </TableHeader>
-            <TableBody
-              isLoading={loading}
-              loadingContent={<div>Loading tags...</div>}
-            >
-              {tags.map((tag) => (
-                <TableRow key={tag.id}>
-                  <TableCell>{tag.name}</TableCell>
-                  <TableCell>{tag.postCount || 0}</TableCell>
-                  <TableCell>
-                    {isAuthenticated ? (
-                      <Tooltip
-                        content={
-                          tag.postCount
-                            ? "Cannot delete tag with existing posts"
-                            : "Delete tag"
-                        }
-                      >
-                        <Button
-                          isIconOnly
-                          variant="flat"
-                          color="danger"
-                          size="sm"
-                          onClick={() => handleDelete(tag)}
-                          isDisabled={
-                            tag?.postCount ? tag.postCount > 0 : false
-                          }
-                        >
-                          <Trash2 size={16} />
-                        </Button>
-                      </Tooltip>
-                    ) : (
-                      <span>-</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardBody>
-      </Card>
-
-      <Modal isOpen={isOpen} onClose={handleModalClose}>
-        <ModalContent>
-          <ModalHeader>Add Tags</ModalHeader>
-          <ModalBody>
-            <div className="space-y-4">
-              <Input
-                label="Enter tags"
-                placeholder="Type and press Enter or comma to add tags"
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={handleTagInputKeyDown}
-              />
-              <div className="flex flex-wrap gap-2">
-                {newTags.map((tag) => (
-                  <Chip
-                    key={tag}
-                    onClose={() => handleRemoveNewTag(tag)}
-                    variant="flat"
-                    endContent={<X size={14} />}
+    <>
+      <div className="min-h-screen bg-gray-50 py-8">
+        <div className="max-w-6xl mx-auto px-4">
+          {/* Header */}
+          <Card className="mb-6">
+            <CardHeader>
+              <div className="flex justify-between items-center w-full">
+                <div>
+                  <h1 className="text-3xl font-bold">Tags</h1>
+                  <p className="text-default-500 mt-1">
+                    Label and categorize your blog posts with tags
+                  </p>
+                </div>
+                
+                {isAuthenticated && (
+                  <Button
+                    color="primary"
+                    startContent={<Plus size={20} />}
+                    onPress={onOpen}
                   >
-                    {tag}
-                  </Chip>
+                    New Tags
+                  </Button>
+                )}
+              </div>
+            </CardHeader>
+          </Card>
+
+          {/* Error Display */}
+          {error && (
+            <Card className="mb-6">
+              <CardBody>
+                <p className="text-danger">{error}</p>
+                <Button 
+                  variant="light" 
+                  size="sm" 
+                  onPress={fetchTags}
+                  className="mt-2"
+                >
+                  Try Again
+                </Button>
+              </CardBody>
+            </Card>
+          )}
+
+          {/* Tags Display */}
+          <Card>
+            <CardBody>
+              <div className="flex flex-wrap gap-3">
+                {tags.map((tag) => (
+                  <div key={tag.id} className="relative group">
+                    <Chip
+                      variant="flat"
+                      size="lg"
+                      startContent={<TagIcon size={16} />}
+                      className="cursor-pointer hover:shadow-md transition-shadow pr-12"
+                      onClick={() => handleViewPosts(tag.id)}
+                    >
+                      <span className="font-medium">{tag.name}</span>
+                      <span className="ml-2 text-xs text-default-500">
+                        ({tag.postCount || 0})
+                      </span>
+                    </Chip>
+                    
+                    {isAuthenticated && (
+                      <Dropdown>
+                        <DropdownTrigger>
+                          <Button 
+                            isIconOnly 
+                            variant="light" 
+                            size="sm"
+                            className="absolute right-1 top-1/2 transform -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <MoreVertical size={14} />
+                          </Button>
+                        </DropdownTrigger>
+                        <DropdownMenu aria-label="Tag actions">
+                          <DropdownItem
+                            key="delete"
+                            className="text-danger"
+                            color="danger"
+                            startContent={<Trash2 size={16} />}
+                            onPress={() => handleDeleteTag(tag.id)}
+                            isDisabled={deleting === tag.id}
+                          >
+                            {deleting === tag.id ? 'Deleting...' : 'Delete'}
+                          </DropdownItem>
+                        </DropdownMenu>
+                      </Dropdown>
+                    )}
+                  </div>
                 ))}
               </div>
+
+              {/* Empty State */}
+              {tags.length === 0 && (
+                <div className="text-center py-12">
+                  <TagIcon size={64} className="mx-auto text-default-300 mb-4" />
+                  <h3 className="text-xl font-semibold mb-2">No Tags Yet</h3>
+                  <p className="text-default-500 mb-6">
+                    Create your first tags to help organize and label your blog posts.
+                  </p>
+                  {isAuthenticated && (
+                    <Button
+                      color="primary"
+                      startContent={<Plus size={20} />}
+                      onPress={onOpen}
+                    >
+                      Create First Tags
+                    </Button>
+                  )}
+                </div>
+              )}
+            </CardBody>
+          </Card>
+        </div>
+      </div>
+
+      {/* Create Tags Modal */}
+      <Modal isOpen={isOpen} onClose={handleModalClose} size="lg">
+        <ModalContent>
+          <ModalHeader>Create New Tags</ModalHeader>
+          <ModalBody>
+            <div className="space-y-4">
+              {/* Tag Input */}
+              <div className="flex gap-2">
+                <Input
+                  label="Tag Name"
+                  placeholder="Enter tag name"
+                  value={currentTagInput}
+                  onValueChange={setCurrentTagInput}
+                  onKeyDown={handleKeyPress}
+                  isInvalid={!!formError}
+                  errorMessage={formError}
+                  className="flex-1"
+                />
+                <Button
+                  color="primary"
+                  variant="flat"
+                  onPress={handleAddTagName}
+                  isDisabled={!currentTagInput.trim() || newTagNames.length >= 10}
+                >
+                  Add
+                </Button>
+              </div>
+
+              {/* Added Tags */}
+              {newTagNames.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">Tags to create:</p>
+                  <div className="flex flex-wrap gap-2">
+                    {newTagNames.map((tagName) => (
+                      <Chip
+                        key={tagName}
+                        variant="flat"
+                        endContent={
+                          <Button
+                            isIconOnly
+                            size="sm"
+                            variant="light"
+                            className="w-4 h-4 min-w-4"
+                            onPress={() => handleRemoveTagName(tagName)}
+                          >
+                            <X size={12} />
+                          </Button>
+                        }
+                      >
+                        {tagName}
+                      </Chip>
+                    ))}
+                  </div>
+                  <p className="text-xs text-default-500">
+                    {newTagNames.length}/10 tags
+                  </p>
+                </div>
+              )}
+
+              <p className="text-sm text-default-500">
+                Press Enter or click Add to add multiple tags. You can create up to 10 tags at once.
+              </p>
             </div>
           </ModalBody>
           <ModalFooter>
-            <Button variant="flat" onClick={handleModalClose}>
+            <Button 
+              variant="light" 
+              onPress={handleModalClose}
+              disabled={creating}
+            >
               Cancel
             </Button>
-            <Button
-              color="primary"
-              onClick={handleAddTags}
-              isLoading={isSubmitting}
-              isDisabled={newTags.length === 0}
+            <Button 
+              color="primary" 
+              onPress={handleCreateTags}
+              isLoading={creating}
+              isDisabled={newTagNames.length === 0}
             >
-              Add Tags
+              Create {newTagNames.length} Tag{newTagNames.length !== 1 ? 's' : ''}
             </Button>
           </ModalFooter>
         </ModalContent>
       </Modal>
-    </div>
+    </>
   );
 };
 

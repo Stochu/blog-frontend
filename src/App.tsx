@@ -12,10 +12,14 @@ import { AuthProvider, useAuth } from "./components/AuthContext";
 
 // Protected Route component
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, loading } = useAuth();
+  
+  if (loading) {
+    return <div>Loading...</div>;
+  }
   
   if (!isAuthenticated) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/login" />;
   }
 
   return <>{children}</>;
@@ -25,56 +29,59 @@ function AppContent() {
   const { isAuthenticated, logout, user } = useAuth();
 
   return (
-    <BrowserRouter>
+    <div className="min-h-screen bg-background">
       <NavBar 
-        isAuthenticated={isAuthenticated}
-        userProfile={user ? {
-          name: user.name,
-          avatar: undefined // Add avatar support if needed
-        } : undefined}
-        onLogout={logout}
+        isAuthenticated={isAuthenticated} 
+        userProfile={user ? { name: user.name, avatar: undefined } : undefined}
+        onLogout={logout} 
       />
-      <main className="container mx-auto py-6">
-        <Routes>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route 
-            path="/posts/new" 
-            element={
-              <ProtectedRoute>
-                <EditPostPage />
-              </ProtectedRoute>
-            } 
-          />
-          <Route path="/posts/:id" element={<PostPage isAuthenticated={isAuthenticated}/>} />
-          <Route 
-            path="/posts/:id/edit" 
-            element={
-              <ProtectedRoute>
-                <EditPostPage />
-              </ProtectedRoute>
-            } 
-          />
-          <Route path="/categories" element={<CategoriesPage isAuthenticated={isAuthenticated}/>} />
-          <Route path="/tags" element={<TagsPage isAuthenticated={isAuthenticated}/>} />
-          <Route 
-            path="/posts/drafts" 
-            element={
-              <ProtectedRoute>
-                <DraftsPage />
-              </ProtectedRoute>
-            } 
-          />
-        </Routes>
-      </main>
-    </BrowserRouter>
+      
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/posts/:id" element={<PostPage />} />
+        <Route path="/categories" element={<CategoriesPage />} />
+        <Route path="/tags" element={<TagsPage />} />
+        <Route path="/login" element={<LoginPage />} />
+        
+        {/* Protected Routes */}
+        <Route 
+          path="/posts/new" 
+          element={
+            <ProtectedRoute>
+              <EditPostPage />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/posts/:id/edit" 
+          element={
+            <ProtectedRoute>
+              <EditPostPage />
+            </ProtectedRoute>
+          } 
+        />
+        <Route 
+          path="/drafts" 
+          element={
+            <ProtectedRoute>
+              <DraftsPage />
+            </ProtectedRoute>
+          } 
+        />
+        
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" />} />
+      </Routes>
+    </div>
   );
 }
 
 function App() {
   return (
     <AuthProvider>
-      <AppContent />
+      <BrowserRouter>
+        <AppContent />
+      </BrowserRouter>
     </AuthProvider>
   );
 }

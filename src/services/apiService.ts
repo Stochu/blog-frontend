@@ -1,69 +1,25 @@
 import axios, { AxiosInstance, AxiosResponse, InternalAxiosRequestConfig, AxiosError } from 'axios';
+import {
+  LoginRequest,
+  AuthenticationResponse,
+  TokenRefreshRequest,
+  LogoutRequest,
+  Category,
+  CreateCategoryRequest,
+  Tag,
+  CreateTagsRequest,
+  TagDTO,
+  Post,
+  CreatePostRequestDTO,
+  UpdatePostRequestDTO,
+  PostStatus,
+  ApiError,
+  PageRequest
+} from '../types/types';
 
-// Types
-export interface LoginRequest {
-  email: string;
-  password: string;
-}
-
-export interface AuthResponse {
-  token: string;
-  expiresIn: number;
-}
-
-export interface Category {
-  id: string;
-  name: string;
-  postCount?: number;
-}
-
-export interface Tag {
-  id: string;
-  name: string;
-  postCount?: number;
-}
-
-export interface Post {
-  id: string;
-  title: string;
-  content: string;
-  author?: {
-    id: string;
-    name: string;
-  };
-  category: Category;
-  tags: Tag[];
-  readingTime?: number;
-  createdAt: string;
-  updatedAt: string;
-  status?: PostStatus;
-}
-
-export interface CreatePostRequest {
-  title: string;
-  content: string;
-  categoryId: string;
-  tagIds: string[];
-  status: PostStatus;
-}
-
-export interface UpdatePostRequest extends CreatePostRequest {
-  id: string;
-}
-
-
-export interface ApiError {
-  status: number;
-  message: string;
-  errors?: Array<{
-    field: string;
-    message: string;
-  }>;
-}
-
-export enum PostStatus {
-  DRAFT = 'DRAFT',
-  PUBLISHED = 'PUBLISHED'
+// Extend axios request config to include our custom "_retry" flag
+interface ExtendedAxiosRequestConfig extends InternalAxiosRequestConfig {
+  _retry?: boolean;
 }
 
 class ApiService {
@@ -81,7 +37,7 @@ class ApiService {
     // Add request interceptor for authentication
     this.api.interceptors.request.use(
       (config: InternalAxiosRequestConfig) => {
-        const token = localStorage.getItem('token');
+        const token = localStorage.getItem('accessToken');
         if (token) {
           config.headers.Authorization = `Bearer ${token}`;
         }
@@ -92,14 +48,41 @@ class ApiService {
       }
     );
 
-    // Add response interceptor for error handling
+    // Add response interceptor for error handling and token refresh
     this.api.interceptors.response.use(
       (response: AxiosResponse) => response,
-      (error: AxiosError) => {
+      async (error: AxiosError) => {
+        const originalRequest = error.config as ExtendedAxiosRequestConfig;
+
+        if (error.response?.status === 401 && originalRequest && !originalRequest?._retry) {
+          originalRequest._retry = true;
+
+          try {
+            const refreshToken = localStorage.getItem('refreshToken');
+            if (refreshToken) {
+              const response = await this.refreshToken(refreshToken);
+              localStorage.setItem('accessToken', response.accessToken);
+              localStorage.setItem('refreshToken', response.refreshToken);
+              
+              // Update the authorization header and retry the request
+              if (originalRequest?.headers) {
+                originalRequest.headers.Authorization = `Bearer ${response.accessToken}`;
+              }
+              return this.api(originalRequest);
+            }
+          } catch (refreshError) {
+            // Refresh failed, clear tokens and redirect to login
+            this.clearTokens();
+            window.location.href = '/login';
+            return Promise.reject(refreshError);
+          }
+        }
+
         if (error.response?.status === 401) {
-          localStorage.removeItem('token');
+          this.clearTokens();
           window.location.href = '/login';
         }
+
         return Promise.reject(this.handleError(error));
       }
     );
@@ -117,24 +100,53 @@ class ApiService {
       return error.response.data as ApiError;
     }
     return {
-      status: 500,
-      message: 'An unexpected error occurred'
+      status: error.response?.status || 500,
+      message: error.message || 'An unexpected error occurred'
     };
   }
 
+  private clearTokens(): void {
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+    localStorage.removeItem('tokenType');
+    localStorage.removeItem('expiresIn');
+  }
+
   // Auth endpoints
-  public async login(credentials: LoginRequest): Promise<AuthResponse> {
-    const response: AxiosResponse<AuthResponse> = await this.api.post('/auth/login', credentials);
-    localStorage.setItem('token', response.data.token);
+  public async login(credentials: LoginRequest): Promise<AuthenticationResponse> {
+    const response: AxiosResponse<AuthenticationResponse> = await this.api.post('/auth/login', credentials);
+    
+    // Store tokens
+    localStorage.setItem('accessToken', response.data.accessToken);
+    localStorage.setItem('refreshToken', response.data.refreshToken);
+    localStorage.setItem('tokenType', response.data.tokenType);
+    localStorage.setItem('expiresIn', response.data.expiresIn.toString());
+    
     return response.data;
   }
 
-  public logout(): void {
-    localStorage.removeItem('token');
+  public async refreshToken(refreshToken: string): Promise<AuthenticationResponse> {
+    const request: TokenRefreshRequest = { refreshToken };
+    const response: AxiosResponse<AuthenticationResponse> = await this.api.post('/auth/login/refresh-token', request);
+    return response.data;
+  }
+
+  public async logout(): Promise<void> {
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (refreshToken) {
+      const request: LogoutRequest = { refreshToken };
+      try {
+        await this.api.post('/auth/login/logout', request);
+      } catch (error) {
+        // Even if logout fails on server, clear local tokens
+        console.error('Logout failed:', error);
+      }
+    }
+    this.clearTokens();
   }
 
   // Posts endpoints
-  public async getPosts(params: {
+  public async getPosts(params?: {
     categoryId?: string;
     tagId?: string;
   }): Promise<Post[]> {
@@ -147,12 +159,12 @@ class ApiService {
     return response.data;
   }
 
-  public async createPost(post: CreatePostRequest): Promise<Post> {
+  public async createPost(post: CreatePostRequestDTO): Promise<Post> {
     const response: AxiosResponse<Post> = await this.api.post('/posts', post);
     return response.data;
   }
 
-  public async updatePost(id: string, post: UpdatePostRequest): Promise<Post> {
+  public async updatePost(id: string, post: UpdatePostRequestDTO): Promise<Post> {
     const response: AxiosResponse<Post> = await this.api.put(`/posts/${id}`, post);
     return response.data;
   }
@@ -161,12 +173,8 @@ class ApiService {
     await this.api.delete(`/posts/${id}`);
   }
 
-  public async getDrafts(params: {
-    page?: number;
-    size?: number;
-    sort?: string;
-  }): Promise<Post[]> {
-    const response: AxiosResponse<Post[]> = await this.api.get('/posts/drafts', { params });
+  public async getDrafts(): Promise<Post[]> {
+    const response: AxiosResponse<Post[]> = await this.api.get('/posts/drafts');
     return response.data;
   }
 
@@ -177,12 +185,8 @@ class ApiService {
   }
 
   public async createCategory(name: string): Promise<Category> {
-    const response: AxiosResponse<Category> = await this.api.post('/categories', { name });
-    return response.data;
-  }
-
-  public async updateCategory(id: string, name: string): Promise<Category> {
-    const response: AxiosResponse<Category> = await this.api.put(`/categories/${id}`, { id, name });
+    const request: CreateCategoryRequest = { name };
+    const response: AxiosResponse<Category> = await this.api.post('/categories', request);
     return response.data;
   }
 
@@ -191,18 +195,40 @@ class ApiService {
   }
 
   // Tags endpoints
-  public async getTags(): Promise<Tag[]> {
-    const response: AxiosResponse<Tag[]> = await this.api.get('/tags');
+  public async getTags(): Promise<TagDTO[]> {
+    const response: AxiosResponse<TagDTO[]> = await this.api.get('/tags');
     return response.data;
   }
 
-  public async createTags(names: string[]): Promise<Tag[]> {
-    const response: AxiosResponse<Tag[]> = await this.api.post('/tags', { names });
+  public async createTags(names: string[]): Promise<TagDTO[]> {
+    const request: CreateTagsRequest = { names };
+    const response: AxiosResponse<TagDTO[]> = await this.api.post('/tags', request);
     return response.data;
   }
 
   public async deleteTag(id: string): Promise<void> {
     await this.api.delete(`/tags/${id}`);
+  }
+
+  // Utility method to check if user is authenticated
+  public isAuthenticated(): boolean {
+    const token = localStorage.getItem('accessToken');
+    const expiresIn = localStorage.getItem('expiresIn');
+    
+    if (!token || !expiresIn) {
+      return false;
+    }
+
+    // Check if token is expired (simplified check)
+    const expirationTime = parseInt(expiresIn);
+    const currentTime = Date.now();
+    
+    return currentTime < expirationTime;
+  }
+
+  // Get current access token
+  public getAccessToken(): string | null {
+    return localStorage.getItem('accessToken');
   }
 }
 

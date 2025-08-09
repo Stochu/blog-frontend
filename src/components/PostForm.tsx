@@ -29,8 +29,7 @@ import {
   ChevronDown,
   X
 } from 'lucide-react';
-import { Post, Category, Tag, PostStatus } from '../services/apiService';
-
+import { Post, Category, Tag, PostStatus } from '../types/types';
 interface PostFormProps {
   initialPost?: Post | null;
   onSubmit: (postData: {
@@ -144,8 +143,8 @@ const PostForm: React.FC<PostFormProps> = ({
   };
 
   const handleHeadingSelect = (level: number) => {
-    editor?.chain().focus().toggleHeading({ level }).run();
-  };
+  editor?.chain().focus().toggleHeading({ level: level as 1 | 2 | 3 }).run();
+};
 
   const suggestedTags = availableTags
     .filter(tag => !selectedTags.includes(tag))

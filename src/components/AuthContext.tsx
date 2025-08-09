@@ -1,18 +1,13 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { apiService } from '../services/apiService';
-
-interface AuthUser {
-  id: string;
-  name: string;
-  email: string;
-}
+import { AuthUser, AuthenticationResponse } from '../types/types';
 
 interface AuthContextType {
   isAuthenticated: boolean;
   user: AuthUser | null;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
-  token: string | null;
+  logout: () => Promise<void>;
+  loading: boolean;
 }
 
 interface AuthProviderProps {
@@ -24,71 +19,91 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [user, setUser] = useState<AuthUser | null>(null);
-  const [token, setToken] = useState<string | null>(localStorage.getItem('token'));
+  const [loading, setLoading] = useState<boolean>(true);
 
-  // Initialize auth state from token
+  // Initialize auth state from stored tokens
   useEffect(() => {
     const initializeAuth = async () => {
-      const storedToken = localStorage.getItem('token');
-      if (storedToken) {
-        try {
-          // TODO: Add endpoint to fetch user profile
-          // const userProfile = await apiService.getUserProfile();
-          // setUser(userProfile);
-          setIsAuthenticated(true);
-          setToken(storedToken);
-        } catch (error) {
-          // If token is invalid, clear authentication
-          localStorage.removeItem('token');
-          setIsAuthenticated(false);
-          setUser(null);
-          setToken(null);
+      try {
+        const accessToken = localStorage.getItem('accessToken');
+        const refreshToken = localStorage.getItem('refreshToken');
+        
+        if (accessToken && refreshToken) {
+          // Check if the token is valid by making a test request
+          // Since we don't have a user profile endpoint, we'll just check if we can access protected resources
+          try {
+            // Try to fetch drafts as a way to validate the token
+            await apiService.getDrafts();
+            setIsAuthenticated(true);
+            // For now, we'll create a mock user since backend doesn't have user profile endpoint
+            // You should add a user profile endpoint to your backend
+            setUser({
+              id: 'current-user-id',
+              name: 'Current User',
+              email: 'user@example.com'
+            });
+          } catch (error) {
+            // Token is invalid, clear it
+            localStorage.removeItem('accessToken');
+            localStorage.removeItem('refreshToken');
+            localStorage.removeItem('tokenType');
+            localStorage.removeItem('expiresIn');
+            setIsAuthenticated(false);
+            setUser(null);
+          }
         }
+      } catch (error) {
+        console.error('Auth initialization failed:', error);
+        setIsAuthenticated(false);
+        setUser(null);
+      } finally {
+        setLoading(false);
       }
     };
 
     initializeAuth();
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (email: string, password: string): Promise<void> => {
     try {
-      const response = await apiService.login({ email, password });
+      await apiService.login({ email, password });
       
-      localStorage.setItem('token', response.token);
-      setToken(response.token);
       setIsAuthenticated(true);
+      
+      // Since we don't have a user profile endpoint, create a mock user
+      // TODO: Add getUserProfile() endpoint to your backend and call it here
+      setUser({
+        id: 'current-user-id',
+        name: 'Current User',
+        email: email
+      });
 
-      // TODO: Add endpoint to fetch user profile after login
-      // const userProfile = await apiService.getUserProfile();
-      // setUser(userProfile);
+      // Tokens are already stored in the apiService.login method
     } catch (error) {
+      setIsAuthenticated(false);
+      setUser(null);
       throw error;
     }
   }, []);
 
-  const logout = useCallback(() => {
-    localStorage.removeItem('token');
-    setIsAuthenticated(false);
-    setUser(null);
-    setToken(null);
-    apiService.logout(); // This clears the token from apiService
+  const logout = useCallback(async (): Promise<void> => {
+    try {
+      await apiService.logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Even if logout fails on server, we should clear local state
+    } finally {
+      setIsAuthenticated(false);
+      setUser(null);
+    }
   }, []);
 
-  // Update apiService token when it changes
-  useEffect(() => {
-    if (token) {
-      // Update axios instance configuration
-      const axiosInstance = apiService['api'];
-      axiosInstance.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-    }
-  }, [token]);
-
-  const value = {
+  const value: AuthContextType = {
     isAuthenticated,
     user,
     login,
     logout,
-    token
+    loading
   };
 
   return (

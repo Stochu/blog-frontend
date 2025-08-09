@@ -6,7 +6,9 @@ import {
   Tabs, 
   Tab,
 } from '@nextui-org/react';
-import { apiService, Post, Category, Tag } from '../services/apiService';
+import { Post, Category, Tag } from '../types/types';
+import { apiService,  } from '../services/apiService';
+
 import PostList from '../components/PostList';
 
 const HomePage: React.FC = () => {
