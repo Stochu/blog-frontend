@@ -10,7 +10,7 @@ import {
   CreateTagsRequest,
   TagDTO,
   Post,
-  CreatePostRequestDTO,
+  CreatePostRequestDTO, 
   UpdatePostRequestDTO,
   PostStatus,
   ApiError,
@@ -22,9 +22,19 @@ interface ExtendedAxiosRequestConfig extends InternalAxiosRequestConfig {
   _retry?: boolean;
 }
 
+// Interface for queued requests
+interface QueuedRequest {
+  resolve: (value: any) => void;
+  reject: (error: any) => void;
+  config: ExtendedAxiosRequestConfig;
+}
+
 class ApiService {
   private api: AxiosInstance;
   private static instance: ApiService;
+  private isRefreshing: boolean = false;
+  private refreshTokenPromise: Promise<AuthenticationResponse> | null = null;
+  private requestQueue: QueuedRequest[] = [];
 
   private constructor() {
     this.api = axios.create({
@@ -33,6 +43,7 @@ class ApiService {
         'Content-Type': 'application/json'
       }
     });
+    
 
     // Add request interceptor for authentication
     this.api.interceptors.request.use(
@@ -54,38 +65,107 @@ class ApiService {
       async (error: AxiosError) => {
         const originalRequest = error.config as ExtendedAxiosRequestConfig;
 
-        if (error.response?.status === 401 && originalRequest && !originalRequest?._retry) {
+        if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+          // Mark this request as retried to prevent infinite loops
           originalRequest._retry = true;
 
-          try {
-            const refreshToken = localStorage.getItem('refreshToken');
-            if (refreshToken) {
-              const response = await this.refreshToken(refreshToken);
+          if (!this.isRefreshing) {
+            // Only one refresh attempt at a time
+            this.isRefreshing = true;
+
+            try {
+              const refreshToken = localStorage.getItem('refreshToken');
+              if (!refreshToken) {
+                throw new Error('No refresh token available');
+              }
+
+              // Create or reuse the refresh promise
+              this.refreshTokenPromise = this.refreshToken(refreshToken);
+              const response = await this.refreshTokenPromise;
+
+              // Update tokens
               localStorage.setItem('accessToken', response.accessToken);
               localStorage.setItem('refreshToken', response.refreshToken);
-              
-              // Update the authorization header and retry the request
-              if (originalRequest?.headers) {
+
+              // Process all queued requests
+              this.processQueue(null, response.accessToken);
+
+              // Update the original request and retry
+              if (originalRequest.headers) {
                 originalRequest.headers.Authorization = `Bearer ${response.accessToken}`;
               }
               return this.api(originalRequest);
+
+            } catch (refreshError) {
+              // Refresh failed, clear everything and redirect
+              this.processQueue(refreshError, null);
+              this.clearTokens();
+              this.handleAuthenticationFailure();
+              return Promise.reject(refreshError);
+            } finally {
+              this.isRefreshing = false;
+              this.refreshTokenPromise = null;
             }
-          } catch (refreshError) {
-            // Refresh failed, clear tokens and redirect to login
-            this.clearTokens();
-            window.location.href = '/login';
-            return Promise.reject(refreshError);
+          } else {
+            // If refresh is already in progress, queue this request
+            return new Promise<AxiosResponse>((resolve, reject) => {
+              this.requestQueue.push({ 
+                resolve, 
+                reject, 
+                config: originalRequest 
+              });
+            });
           }
         }
 
+        // Handle other 401 errors (e.g., refresh token expired)
         if (error.response?.status === 401) {
           this.clearTokens();
-          window.location.href = '/login';
+          this.handleAuthenticationFailure();
         }
-
         return Promise.reject(this.handleError(error));
       }
     );
+  }
+
+  /**
+   * Process all queued requests after token refresh
+   */
+  private processQueue(error: any, token: string | null): void {
+    this.requestQueue.forEach(({ resolve, reject, config }) => {
+      if (error) {
+        reject(error);
+      } else {
+        // Update authorization header and retry request
+        if (config.headers && token) {
+          config.headers.Authorization = `Bearer ${token}`;
+        }
+        this.api(config)
+          .then(resolve)
+          .catch(reject);
+      }
+    });
+
+    // Clear the queue
+    this.requestQueue = [];
+  }
+
+  /**
+   * Handle authentication failure with proper user notification
+   */
+  private handleAuthenticationFailure(): void {
+    // Dispatch custom event for authentication failure
+    window.dispatchEvent(new CustomEvent('authenticationError', {
+      detail: { 
+        message: 'Your session has expired. Please log in again.',
+        type: 'TOKEN_EXPIRED'
+      }
+    }));
+
+     // Redirect to login after a short delay to allow UI to show the message
+    setTimeout(() => {
+      window.location.href = '/login';
+    }, 2000);
   }
 
   public static getInstance(): ApiService {
@@ -115,19 +195,21 @@ class ApiService {
   // Auth endpoints
   public async login(credentials: LoginRequest): Promise<AuthenticationResponse> {
     const response: AxiosResponse<AuthenticationResponse> = await this.api.post('/auth/login', credentials);
-    
+
     // Store tokens
     localStorage.setItem('accessToken', response.data.accessToken);
     localStorage.setItem('refreshToken', response.data.refreshToken);
     localStorage.setItem('tokenType', response.data.tokenType);
     localStorage.setItem('expiresIn', response.data.expiresIn.toString());
-    
+
     return response.data;
   }
 
   public async refreshToken(refreshToken: string): Promise<AuthenticationResponse> {
     const request: TokenRefreshRequest = { refreshToken };
-    const response: AxiosResponse<AuthenticationResponse> = await this.api.post('/auth/login/refresh-token', request);
+    // Use a separate axios instance for refresh to avoid interceptor loops
+    const refreshApi = axios.create({ baseURL: '/api/v1' });
+    const response: AxiosResponse<AuthenticationResponse> = await refreshApi.post('/auth/refresh-token', request);
     return response.data;
   }
 
@@ -136,7 +218,7 @@ class ApiService {
     if (refreshToken) {
       const request: LogoutRequest = { refreshToken };
       try {
-        await this.api.post('/auth/login/logout', request);
+        await this.api.post('/auth/logout', request);
       } catch (error) {
         // Even if logout fails on server, clear local tokens
         console.error('Logout failed:', error);
@@ -214,7 +296,7 @@ class ApiService {
   public isAuthenticated(): boolean {
     const token = localStorage.getItem('accessToken');
     const expiresIn = localStorage.getItem('expiresIn');
-    
+
     if (!token || !expiresIn) {
       return false;
     }
@@ -222,7 +304,7 @@ class ApiService {
     // Check if token is expired (simplified check)
     const expirationTime = parseInt(expiresIn);
     const currentTime = Date.now();
-    
+
     return currentTime < expirationTime;
   }
 
