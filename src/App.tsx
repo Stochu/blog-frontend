@@ -44,6 +44,14 @@ function AppContent() {
         <Route path="/login" element={<LoginPage />} />
         
         {/* Protected Routes */}
+        <Route
+          path="/posts/drafts" 
+          element={
+            <ProtectedRoute>
+              <DraftsPage />
+            </ProtectedRoute>
+          } 
+        />
         <Route 
           path="/posts/new" 
           element={
