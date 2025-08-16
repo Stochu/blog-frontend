@@ -14,7 +14,8 @@ import {
   UpdatePostRequestDTO,
   PostStatus,
   ApiError,
-  PageRequest
+  PageRequest,
+  RegisterRequest
 } from '../types/types';
 
 // Extend axios request config to include our custom "_retry" flag
@@ -226,6 +227,18 @@ class ApiService {
     }
     this.clearTokens();
   }
+
+  public async register(userData: RegisterRequest): Promise<AuthenticationResponse> {
+  const response: AxiosResponse<AuthenticationResponse> = await this.api.post('/auth/register', userData);
+
+  // Store tokens
+  localStorage.setItem('accessToken', response.data.accessToken);
+  localStorage.setItem('refreshToken', response.data.refreshToken);
+  localStorage.setItem('tokenType', response.data.tokenType);
+  localStorage.setItem('expiresIn', response.data.expiresIn.toString());
+
+  return response.data;
+}
 
   // Posts endpoints
   public async getPosts(params?: {

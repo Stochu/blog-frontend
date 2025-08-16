@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Card, CardHeader, CardBody, Input, Button } from '@nextui-org/react';
 import { useAuth } from '../components/AuthContext';
 
@@ -80,8 +80,20 @@ const LoginPage: React.FC = () => {
             </form>
           </CardBody>
         </Card>
+        <div className="text-center">
+          <p className="text-sm text-gray-600">
+            Don't have an account?{' '}
+            <Link 
+              to="/register" 
+              className="font-medium text-blue-600 hover:text-blue-500"
+            >
+            Create one here
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
+    
   );
 };
 

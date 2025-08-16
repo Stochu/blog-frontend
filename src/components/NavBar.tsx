@@ -139,8 +139,22 @@ const NavBar: React.FC<NavBarProps> = ({
         ) : (
           <>
             <NavbarItem>
-              <Button as={Link} to="/login" variant="flat">
-                Log In
+              <Button 
+                as={Link}
+                to="/login"
+                variant="flat"
+              >
+                Sign In
+              </Button>
+            </NavbarItem>
+            <NavbarItem>
+              <Button 
+                as={Link}
+                to="/register"
+                color="primary"
+                variant="solid"
+              >
+                Sign Up
               </Button>
             </NavbarItem>
           </>

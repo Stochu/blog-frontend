@@ -1,11 +1,12 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { apiService } from '../services/apiService';
-import { AuthUser, AuthenticationResponse } from '../types/types';
+import { AuthUser, AuthenticationResponse, RegisterRequest } from '../types/types';
 
 interface AuthContextType {
   isAuthenticated: boolean;
   user: AuthUser | null;
   login: (email: string, password: string) => Promise<void>;
+  register: (userData: RegisterRequest) => Promise<void>;
   logout: () => Promise<void>;
   loading: boolean;
 }
@@ -97,14 +98,35 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
       setUser(null);
     }
   }, []);
+  
+  const register = useCallback(async (userData: RegisterRequest): Promise<void> => {
+  try {
+    await apiService.register(userData);
+    
+    setIsAuthenticated(true);
+    
+    // Create user object from registration data
+    setUser({
+      id: 'current-user-id', // This will be replaced when we add user profile endpoint
+      name: userData.name,
+      email: userData.email
+    });
 
-  const value: AuthContextType = {
-    isAuthenticated,
-    user,
-    login,
-    logout,
-    loading
-  };
+  } catch (error) {
+    setIsAuthenticated(false);
+    setUser(null);
+    throw error;
+  }
+}, []);
+
+const value: AuthContextType = {
+  isAuthenticated,
+  user,
+  login,
+  register,
+  logout,
+  loading
+};
 
   return (
     <AuthContext.Provider value={value}>
